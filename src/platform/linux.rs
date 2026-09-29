@@ -317,10 +317,85 @@ fn verify_ssh_setup() -> Result<(), crate::error::PuppetError> {
         ],
     )?;
 
+    verify_ssh_service_running()?;
+    verify_ssh_port()?;
+
     println!("SSH user: VERIFIED");
     println!("Authorized key: VERIFIED");
     println!("Public-key authentication: VERIFIED");
     println!("SSH user restriction: VERIFIED");
+    println!("SSH service: RUNNING");
+    println!("SSH port 22: LISTENING");
+
+    Ok(())
+}
+
+fn verify_ssh_service_running() -> Result<(), crate::error::PuppetError> {
+    if command::run("sh", &["-c", "command -v systemctl"]).is_ok() {
+        let service = if systemd_service_exists("sshd") {
+            "sshd"
+        } else if systemd_service_exists("ssh") {
+            "ssh"
+        } else {
+            return Err(crate::error::PuppetError::Unsupported(
+                "could not find an sshd or ssh systemd service".to_string(),
+            ));
+        };
+
+        let state = command::run(
+            "systemctl",
+            &["is-active", "--quiet", service],
+        );
+
+        if state.is_err() {
+            return Err(crate::error::PuppetError::ConfigurationError(
+                format!("SSH service '{}' is not running", service),
+            ));
+        }
+
+        return Ok(());
+    }
+
+    if command::run("sh", &["-c", "command -v rc-service"]).is_ok() {
+        command::run("rc-service", &["sshd", "status"])?;
+        return Ok(());
+    }
+
+    Err(crate::error::PuppetError::Unsupported(
+        "could not verify SSH service status".to_string(),
+    ))
+}
+
+fn verify_ssh_port() -> Result<(), crate::error::PuppetError> {
+    if command::run("sh", &["-c", "command -v ss"]).is_err() {
+        return Err(crate::error::PuppetError::Unsupported(
+            "the 'ss' command is required to verify TCP port 22".to_string(),
+        ));
+    }
+
+    let output = command::run("ss", &["-ltn"])?;
+
+    let listening = output
+        .stdout
+        .lines()
+        .any(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+
+            if fields.len() < 4 {
+                return false;
+            }
+
+            let local_address = fields[3];
+
+            local_address.ends_with(":22")
+                || local_address.ends_with("]:22")
+        });
+
+    if !listening {
+        return Err(crate::error::PuppetError::ConfigurationError(
+            "SSH is not listening on TCP port 22".to_string(),
+        ));
+    }
 
     Ok(())
 }
