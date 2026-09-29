@@ -146,20 +146,23 @@ fn openssh_server_installed() -> bool {
 }
 
 fn create_ssh_user() -> Result<(), crate::error::PuppetError> {
-    if command::run("id", &["puppet-ssh"]).is_ok() {
-        println!("SSH user: puppet-ssh already exists");
-        return Ok(());
-    }
+    let user_exists = command::run("id", &["puppet-ssh"]).is_ok();
 
-    command::run(
-        "useradd",
-        &[
-            "--create-home",
-            "--shell",
-            "/bin/bash",
-            "puppet-ssh",
-        ],
-    )?;
+    if user_exists {
+        println!("SSH user: puppet-ssh already exists");
+    } else {
+        command::run(
+            "useradd",
+            &[
+                "--create-home",
+                "--shell",
+                "/bin/bash",
+                "puppet-ssh",
+            ],
+        )?;
+
+        println!("SSH user: puppet-ssh created");
+    }
 
     if command::run("getent", &["group", "sudo"]).is_ok() {
         command::run("usermod", &["-aG", "sudo", "puppet-ssh"])?;
@@ -171,7 +174,6 @@ fn create_ssh_user() -> Result<(), crate::error::PuppetError> {
         ));
     }
 
-    println!("SSH user: puppet-ssh created");
     println!("Administrator access: configured");
 
     Ok(())
@@ -210,11 +212,74 @@ fn show_connection_info() -> Result<(), crate::error::PuppetError> {
 fn verify_ssh_setup() -> Result<(), crate::error::PuppetError> {
     command::run("id", &["puppet-ssh"])?;
 
+    let home = command::run(
+        "sh",
+        &[
+            "-c",
+            "getent passwd puppet-ssh | cut -d: -f6",
+        ],
+    )?
+    .stdout
+    .trim()
+    .to_string();
+
+    if home.is_empty() {
+        return Err(crate::error::PuppetError::ConfigurationError(
+            "could not determine puppet-ssh home directory".to_string(),
+        ));
+    }
+
+    let authorized_keys = format!("{}/.ssh/authorized_keys", home);
+
+    if !std::path::Path::new(&authorized_keys).is_file() {
+        return Err(crate::error::PuppetError::ConfigurationError(
+            format!("authorized_keys not found at {}", authorized_keys),
+        ));
+    }
+
+    let ssh_dir = format!("{}/.ssh", home);
+
     command::run(
         "sh",
         &[
             "-c",
-            "test -f /home/puppet-ssh/.ssh/authorized_keys",
+            &format!(
+                "test "$(stat -c '%U:%G' '{}')" = 'puppet-ssh:puppet-ssh'",
+                ssh_dir
+            ),
+        ],
+    )?;
+
+    command::run(
+        "sh",
+        &[
+            "-c",
+            &format!(
+                "test "$(stat -c '%a' '{}')" = '700'",
+                ssh_dir
+            ),
+        ],
+    )?;
+
+    command::run(
+        "sh",
+        &[
+            "-c",
+            &format!(
+                "test "$(stat -c '%U:%G' '{}')" = 'puppet-ssh:puppet-ssh'",
+                authorized_keys
+            ),
+        ],
+    )?;
+
+    command::run(
+        "sh",
+        &[
+            "-c",
+            &format!(
+                "test "$(stat -c '%a' '{}')" = '600'",
+                authorized_keys
+            ),
         ],
     )?;
 
@@ -337,7 +402,23 @@ fn configure_ssh_authentication() -> Result<(), crate::error::PuppetError> {
 }
 
 fn install_authorized_key() -> Result<(), crate::error::PuppetError> {
-    let home = "/home/puppet-ssh";
+    let home = command::run(
+        "sh",
+        &[
+            "-c",
+            "getent passwd puppet-ssh | cut -d: -f6",
+        ],
+    )?
+    .stdout
+    .trim()
+    .to_string();
+
+    if home.is_empty() {
+        return Err(crate::error::PuppetError::ConfigurationError(
+            "could not determine puppet-ssh home directory".to_string(),
+        ));
+    }
+
     let ssh_dir = format!("{}/.ssh", home);
     let authorized_keys = format!("{}/authorized_keys", ssh_dir);
 
