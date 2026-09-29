@@ -1,0 +1,29 @@
+name: Build Linux
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Build
+        run: cargo build --release --target x86_64-unknown-linux-gnu
+
+      - name: Upload Linux executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: puppet-ssh-linux-x64
+          path: target/x86_64-unknown-linux-gnu/release/puppet-ssh
