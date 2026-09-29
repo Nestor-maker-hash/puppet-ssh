@@ -239,49 +239,67 @@ fn verify_ssh_setup() -> Result<(), crate::error::PuppetError> {
 
     let ssh_dir = format!("{}/.ssh", home);
 
-    command::run(
-        "sh",
-        &[
-            "-c",
-            &format!(
-                "test "$(stat -c '%U:%G' '{}')" = 'puppet-ssh:puppet-ssh'",
-                ssh_dir
-            ),
-        ],
-    )?;
+    let ssh_dir_owner = command::run(
+        "stat",
+        &["-c", "%U:%G", &ssh_dir],
+    )?
+    .stdout
+    .trim()
+    .to_string();
 
-    command::run(
-        "sh",
-        &[
-            "-c",
-            &format!(
-                "test "$(stat -c '%a' '{}')" = '700'",
-                ssh_dir
-            ),
-        ],
-    )?;
+    if ssh_dir_owner != "puppet-ssh:puppet-ssh" {
+        return Err(crate::error::PuppetError::ConfigurationError(
+            format!("incorrect .ssh ownership: {}", ssh_dir_owner),
+        ));
+    }
 
-    command::run(
-        "sh",
-        &[
-            "-c",
-            &format!(
-                "test "$(stat -c '%U:%G' '{}')" = 'puppet-ssh:puppet-ssh'",
-                authorized_keys
-            ),
-        ],
-    )?;
+    let ssh_dir_mode = command::run(
+        "stat",
+        &["-c", "%a", &ssh_dir],
+    )?
+    .stdout
+    .trim()
+    .to_string();
 
-    command::run(
-        "sh",
-        &[
-            "-c",
-            &format!(
-                "test "$(stat -c '%a' '{}')" = '600'",
-                authorized_keys
+    if ssh_dir_mode != "700" {
+        return Err(crate::error::PuppetError::ConfigurationError(
+            format!("incorrect .ssh permissions: {}", ssh_dir_mode),
+        ));
+    }
+
+    let authorized_keys_owner = command::run(
+        "stat",
+        &["-c", "%U:%G", &authorized_keys],
+    )?
+    .stdout
+    .trim()
+    .to_string();
+
+    if authorized_keys_owner != "puppet-ssh:puppet-ssh" {
+        return Err(crate::error::PuppetError::ConfigurationError(
+            format!(
+                "incorrect authorized_keys ownership: {}",
+                authorized_keys_owner
             ),
-        ],
-    )?;
+        ));
+    }
+
+    let authorized_keys_mode = command::run(
+        "stat",
+        &["-c", "%a", &authorized_keys],
+    )?
+    .stdout
+    .trim()
+    .to_string();
+
+    if authorized_keys_mode != "600" {
+        return Err(crate::error::PuppetError::ConfigurationError(
+            format!(
+                "incorrect authorized_keys permissions: {}",
+                authorized_keys_mode
+            ),
+        ));
+    }
 
     command::run(
         "sh",
