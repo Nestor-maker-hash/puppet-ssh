@@ -327,13 +327,19 @@ fn verify_ssh_setup() -> Result<(), crate::error::PuppetError> {
 
 fn restart_sshd() -> Result<(), crate::error::PuppetError> {
     if command::run("sh", &["-c", "command -v systemctl"]).is_ok() {
-        if command::run("systemctl", &["restart", "sshd"]).is_ok() {
-            println!("SSH service: RESTARTED");
-            return Ok(());
-        }
+        let service = if systemd_service_exists("sshd") {
+            "sshd"
+        } else if systemd_service_exists("ssh") {
+            "ssh"
+        } else {
+            return Err(crate::error::PuppetError::Unsupported(
+                "could not find an sshd or ssh systemd service".to_string(),
+            ));
+        };
 
-        command::run("systemctl", &["restart", "ssh"])?;
-        println!("SSH service: RESTARTED");
+        command::run("systemctl", &["restart", service])?;
+
+        println!("SSH service: RESTARTED ({})", service);
         return Ok(());
     }
 
@@ -346,6 +352,15 @@ fn restart_sshd() -> Result<(), crate::error::PuppetError> {
     Err(crate::error::PuppetError::Unsupported(
         "could not restart the SSH service".to_string(),
     ))
+}
+
+fn systemd_service_exists(service: &str) -> bool {
+    command::run(
+        "systemctl",
+        &["show", "-p", "LoadState", service],
+    )
+    .map(|output| output.stdout.trim() == "LoadState=loaded")
+    .unwrap_or(false)
 }
 
 fn configure_firewall() -> Result<(), crate::error::PuppetError> {
@@ -526,13 +541,25 @@ fn install_authorized_key() -> Result<(), crate::error::PuppetError> {
 
 fn enable_and_start_sshd() -> Result<(), crate::error::PuppetError> {
     if command::run("sh", &["-c", "command -v systemctl"]).is_ok() {
-        command::run("systemctl", &["enable", "--now", "sshd"])
-            .or_else(|_| command::run("systemctl", &["enable", "--now", "ssh"]))?;
+        let service = if systemd_service_exists("sshd") {
+            "sshd"
+        } else if systemd_service_exists("ssh") {
+            "ssh"
+        } else {
+            return Err(crate::error::PuppetError::Unsupported(
+                "could not find an sshd or ssh systemd service".to_string(),
+            ));
+        };
+
+        command::run("systemctl", &["enable", "--now", service])?;
+
+        println!("SSH service: ENABLED AND STARTED ({})", service);
         return Ok(());
     }
 
     if command::run("sh", &["-c", "command -v rc-service"]).is_ok() {
         command::run("rc-service", &["sshd", "start"])?;
+        println!("SSH service: STARTED");
         return Ok(());
     }
 
